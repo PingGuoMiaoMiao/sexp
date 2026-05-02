@@ -17,7 +17,7 @@
       "patterns": [
         {
           "name": "keyword.control.utlc",
-          "match": "\\blambda\\b"
+          "match": "\\b(lambda|λ)\\b"
         }
       ]
     },

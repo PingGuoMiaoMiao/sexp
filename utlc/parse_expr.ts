@@ -74,14 +74,6 @@ function syntax_to_span(syn: syntax, text: string): string {
     return "";
 }
 
-// 过滤可跳过节点（仅空格）
-function is_skipable(syn: syntax): boolean {
-    if (syn.tag === syntax.tag.atom) {
-        return syn.leaf.kind === token.kind.atom.space;
-    }
-    return false;
-}
-
 // 从 group 中提取有意义的子节点（过滤空格和圆括号）
 function meaningful_children(group: syntax.group): syntax[] {
     return group.children.filter(child => {

@@ -14,7 +14,9 @@
     "name": "illusory0x0",
     "url": "https://github.com/illusory0x0"
   },
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:utlc"
+  ],
   "contributes": {
     "languages": [
       {

@@ -1,61 +1,75 @@
-export { make };
 import * as vscode from "vscode";
-import { Diagnostic, Range, Position } from "vscode";
-import { DiagnosticSeverity as Severity } from "vscode";
-import type {ParseError} from "./parse_expr";
-import { parse_expr } from "./parse_expr";
+import { parse_expr, type ParseError } from "./parse_expr";
 
-const name = "utlc";
-enum Scheme { file = "file", output = "output", }
-type Provider = (event: vscode.TextDocumentChangeEvent) => void;
-const error: {
-  readonly to_diagnostic: (self: ParseError) => Diagnostic;
-} = {
-  to_diagnostic: self => {
-    let {
-      range: { start, end },
-      message,
-    } = self;
-    const pstart = new Position(start.line, start.character);
-    const pend = new Position(end.line, end.character);
-    const range = new Range(pstart, pend);
-    const rslt = new Diagnostic(range, message, Severity.Error);
-    return rslt;
-  },
-};
-const handler = (
-  out: vscode.OutputChannel,
-  event: vscode.TextDocumentChangeEvent,
-  dia: vscode.DiagnosticCollection,
-): void => {
-  const text = event.document.getText();
-  const prs = parse_expr(text);  // prs 现在是 { exprs: [...], errors: [...] }
-  
-  // 从 prs 中提取 errors
-  const errors = prs.errors;
-  
-  // 将 errors 转换为 diagnostics
-  const diagnostics = errors.map(error.to_diagnostic);
-  
-  // 将 diagnostics 设置到诊断集合
-  dia.set(event.document.uri, diagnostics);
-  
-  // 可选：输出调试信息
-  if (errors.length > 0) {
-    out.appendLine(`[utlc] Found ${errors.length} error(s)`);
-    for (const err of errors) {
-      out.appendLine(`  - ${err.message} at ${err.range.start.line}:${err.range.start.character}`);
+const LANGUAGE_ID = "utlc";
+
+/**
+ * 将 ParseError 转换为 VS Code Diagnostic
+ */
+function errorToDiagnostic(err: ParseError): vscode.Diagnostic {
+    const { start, end } = err.range;
+    const range = new vscode.Range(
+        new vscode.Position(start.line, start.character),
+        new vscode.Position(end.line, end.character)
+    );
+    return new vscode.Diagnostic(range, err.message, vscode.DiagnosticSeverity.Error);
+}
+
+/**
+ * 解析文档并返回诊断结果
+ */
+function diagnoseDocument(doc: vscode.TextDocument): vscode.Diagnostic[] {
+    const text = doc.getText();
+    const { errors } = parse_expr(text);
+    return errors.map(errorToDiagnostic);
+}
+
+/**
+ * 注册 UTLC 诊断功能
+ * - 监听文档变化（实时诊断）
+ * - 监听文档打开
+ * - 对已打开的文件执行初始诊断
+ */
+export function registerDiagnostics(context: vscode.ExtensionContext): void {
+    const collection = vscode.languages.createDiagnosticCollection(LANGUAGE_ID);
+    context.subscriptions.push(collection);
+
+    // 输出通道，用于调试日志
+    const out = vscode.window.createOutputChannel(LANGUAGE_ID, "log");
+    context.subscriptions.push(out);
+
+    // 文档变化时更新诊断
+    const changeDisposable = vscode.workspace.onDidChangeTextDocument(event => {
+        const doc = event.document;
+        if (doc.languageId !== LANGUAGE_ID) return;
+        if (event.contentChanges.length === 0) return;
+        if (doc.uri.scheme === "output") return;
+
+        const diagnostics = diagnoseDocument(doc);
+        collection.set(doc.uri, diagnostics);
+
+        if (diagnostics.length > 0) {
+            out.appendLine(`[utlc] Found ${diagnostics.length} error(s) in ${doc.uri.fsPath}`);
+            for (const diag of diagnostics) {
+                out.appendLine(`  - ${diag.message} at ${diag.range.start.line}:${diag.range.start.character}`);
+            }
+        }
+    });
+    context.subscriptions.push(changeDisposable);
+
+    // 文档打开时更新诊断
+    const openDisposable = vscode.workspace.onDidOpenTextDocument(doc => {
+        if (doc.languageId !== LANGUAGE_ID) return;
+        const diagnostics = diagnoseDocument(doc);
+        collection.set(doc.uri, diagnostics);
+    });
+    context.subscriptions.push(openDisposable);
+
+    // 对已打开的所有 UTLC 文件执行初始诊断
+    for (const doc of vscode.workspace.textDocuments) {
+        if (doc.languageId === LANGUAGE_ID) {
+            const diagnostics = diagnoseDocument(doc);
+            collection.set(doc.uri, diagnostics);
+        }
     }
-  }
-};
-const register_diagnostic = (name: string) =>
-  vscode.languages.createDiagnosticCollection(name);
-const manager = register_diagnostic(name);
-const make = (out: vscode.OutputChannel): Provider => {
-  return e => {
-    if (e.contentChanges.length === 0) return;
-    if (e.document.uri.scheme === Scheme.output) return;
-    if (e.document.languageId !== name) return;  // 这里应该是 "utlc"，不是 "textmate"
-    handler(out, e, manager);
-  };
-};
+}
